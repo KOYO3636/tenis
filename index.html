@@ -1,44 +1,488 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useRef, useEffect, useState } from 'react';
 
-export default function TennisGame() {
-  const [ballPosition, setBallPosition] = useState({ x: 50, y: 50 });
-  const [playerScore, setPlayerScore] = useState(0);
-  const [cpuScore, setCpuScore] = useState(0);
+// Ball In The Hole - realistic goal-floor collision
+// Full playable React component. This file exports a single default component
+// that renders a responsive canvas game. Works on desktop and mobile.
 
-  const hitBall = () => {
-    // Simulate random ball movement and scoring
-    const newX = Math.random() * 80 + 10;
-    const newY = Math.random() * 80 + 10;
-    setBallPosition({ x: newX, y: newY });
+export default function BallInHoleEnhanced(): JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
 
-    if (Math.random() > 0.5) {
-      setPlayerScore(playerScore + 1);
-    } else {
-      setCpuScore(cpuScore + 1);
+  // UI state
+  const [shots, setShots] = useState(0);
+  const [score, setScore] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [aiming, setAiming] = useState(false);
+  const [powerMultiplier, setPowerMultiplier] = useState(1); // slider 0.5 - 2.0
+
+  // Physics constants
+  const GRAVITY = 980; // px/s^2 equivalent
+  const PIXELS_SCALE = 100; // tuning scale
+
+  // Game state stored in refs to avoid constant re-renders
+  const ballRef = useRef({ x: 0, y: 0, r: 18, vx: 0, vy: 0, moving: false });
+  const goalRef = useRef({ x: 120, y: 0, w: 120, h: 120 });
+  const pillarRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const aimRef = useRef({ active: false, x: 0, y: 0 });
+  const scoredRef = useRef(false); // prevent repeat scoring
+
+  // Audio context for simple beep on success
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    try {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    } catch (e) {
+      audioCtxRef.current = null;
+    }
+  }, []);
+
+  const playSuccess = () => {
+    // vibration
+    if (navigator && (navigator as any).vibrate) {
+      try {
+        (navigator as any).vibrate(120);
+      } catch {}
+    }
+
+    // beep
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 0.2);
+  };
+
+  // Responsive size and initial positions
+  const setCanvasSize = (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const w = rect.width;
+    const h = rect.height;
+
+    // goal on left
+    goalRef.current = { x: Math.round(w * 0.12), y: Math.round(h - 80 - 140), w: 120, h: 120 };
+
+    // central pillar
+    const pillarW = Math.floor(w * 0.12);
+    const pillarH = Math.floor(h * 0.35);
+    pillarRef.current = { x: Math.round(w / 2 - pillarW / 2), y: Math.round(h - 80 - pillarH), w: pillarW, h: pillarH };
+
+    // ball start
+    if (!ballRef.current.moving && ballRef.current.x === 0 && ballRef.current.y === 0) {
+      ballRef.current.x = Math.round(w * 0.85);
+      ballRef.current.y = Math.round(h * 0.85 - 10);
     }
   };
 
+  const resetBall = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    ballRef.current.x = Math.round(rect.width * 0.85);
+    ballRef.current.y = Math.round(rect.height * 0.85 - 10);
+    ballRef.current.vx = 0;
+    ballRef.current.vy = 0;
+    ballRef.current.moving = false;
+    aimRef.current.active = false;
+    setAiming(false);
+    scoredRef.current = false;
+  };
+
+  const pointOnBall = (px: number, py: number) => {
+    const b = ballRef.current;
+    return Math.hypot(px - b.x, py - b.y) <= b.r + 6;
+  };
+
+  // draw
+  const draw = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+    // background
+    ctx.fillStyle = '#4fb1df';
+    ctx.fillRect(0, 0, w, h);
+
+    // ground
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, h - 80, w, 80);
+
+    // goal (draw floor inside box darker for depth)
+    const g = goalRef.current;
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(g.x, g.y);
+    ctx.lineTo(g.x, g.y + g.h);
+    ctx.lineTo(g.x + g.w, g.y + g.h);
+    ctx.moveTo(g.x + g.w, g.y);
+    ctx.lineTo(g.x + g.w, g.y + g.h);
+    ctx.stroke();
+
+    // draw goal floor (slightly shaded)
+    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+    ctx.fillRect(g.x + 6, g.y + g.h - 12, g.w - 12, 12);
+
+    // pillar
+    const p = pillarRef.current;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+
+    // ball shadow on canvas floor
+    const b = ballRef.current;
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(b.x + 8, h - 60, b.r + 6, (b.r + 6) * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // if ball is inside goal, draw inner shadow (gives depth)
+    if (b.x > g.x && b.x < g.x + g.w && b.y > g.y) {
+      ctx.fillStyle = 'rgba(0,0,0,0.08)';
+      ctx.beginPath();
+      ctx.ellipse(b.x + 4, b.y + 6, b.r + 8, (b.r + 8) * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ball
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // texts
+    ctx.fillStyle = '#fff';
+    ctx.font = '22px Arial';
+    ctx.fillText(`LEVEL: ${level}`, 20, 30);
+    ctx.fillText(`SHOTS: ${shots}`, Math.round(w / 2 - 40), 30);
+    ctx.fillText(`SCORE: ${score}`, Math.round(w - 120), 30);
+
+    // draw aim preview
+    if (aimRef.current.active) drawTrajectoryPreview(ctx, w, h);
+  };
+
+  // Trajectory preview: simulate and stop on floor OR pillar collision
+  const drawTrajectoryPreview = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+    const b = ballRef.current;
+    const aim = aimRef.current;
+    const p = pillarRef.current;
+    const g = goalRef.current;
+
+    const dx = aim.x - b.x;
+    const dy = aim.y - b.y;
+    const basePower = Math.min(1200, Math.hypot(dx, dy));
+    const power = basePower * powerMultiplier;
+    const angle = Math.atan2(dy, dx);
+    const speed = (power * 2.2) / PIXELS_SCALE; // tuned
+
+    let simX = b.x;
+    let simY = b.y;
+    let velX = Math.cos(angle) * speed;
+    let velY = Math.sin(angle) * speed;
+
+    const steps = 160;
+    ctx.save();
+    for (let i = 0; i < steps; i++) {
+      const dt = 1 / 60;
+      // integrate in px units
+      simX += velX * dt * PIXELS_SCALE;
+      simY += velY * dt * PIXELS_SCALE;
+      velY += (GRAVITY * dt) / PIXELS_SCALE;
+
+      // draw dot
+      ctx.beginPath();
+      const alpha = Math.max(0.12, 1 - i / steps);
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.arc(simX, simY, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // stop if hits outer floor
+      if (simY >= h - 80 - b.r) break;
+
+      // stop if collides with pillar (simple rect collision)
+      if (simX >= p.x && simX <= p.x + p.w && simY >= p.y) break;
+
+      // if it would enter the goal region, continue simulating inside the box
+      if (simX > g.x && simX < g.x + g.w && simY >= g.y) {
+        // simulate until hits goal floor
+        while (simY < g.y + g.h - b.r) {
+          simX += velX * (1 / 60) * PIXELS_SCALE;
+          simY += velY * (1 / 60) * PIXELS_SCALE;
+          velY += (GRAVITY * (1 / 60)) / PIXELS_SCALE;
+          ctx.beginPath();
+          ctx.arc(simX, simY, 3, 0, Math.PI * 2);
+          ctx.fill();
+          if (simY >= g.y + g.h - b.r) break;
+        }
+        break;
+      }
+    }
+    ctx.restore();
+  };
+
+  // Launch ball using aim + power multiplier
+  const launchAtAim = () => {
+    const b = ballRef.current;
+    const aim = aimRef.current;
+    if (!aim.active) return;
+
+    const dx = aim.x - b.x;
+    const dy = aim.y - b.y;
+    const basePower = Math.min(1200, Math.hypot(dx, dy));
+    const power = basePower * powerMultiplier;
+    const angle = Math.atan2(dy, dx);
+    const speed = (power * 2.2) / PIXELS_SCALE;
+
+    b.vx = Math.cos(angle) * speed;
+    b.vy = Math.sin(angle) * speed;
+    b.moving = true;
+
+    aimRef.current.active = false;
+    setAiming(false);
+    setShots((s) => s + 1);
+    scoredRef.current = false;
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const resize = () => setCanvasSize(canvas, ctx);
+    resize();
+    window.addEventListener('resize', resize);
+
+    let last = performance.now();
+
+    const frame = (t: number) => {
+      const dt = Math.min(1 / 30, (t - last) / 1000);
+      last = t;
+
+      const b = ballRef.current;
+      const rect = canvas.getBoundingClientRect();
+
+      if (b.moving) {
+        b.x += b.vx * dt * PIXELS_SCALE;
+        b.y += b.vy * dt * PIXELS_SCALE;
+        b.vy += (GRAVITY * dt) / PIXELS_SCALE;
+
+        const floorY = rect.height - 80 - b.r;
+
+        // If ball is inside goal region, detect collision with goal floor & side walls
+        const g = goalRef.current;
+        const p = pillarRef.current;
+        const insideGoal = b.x > g.x + 6 && b.x < g.x + g.w - 6 && b.y + b.r >= g.y;
+
+        if (insideGoal) {
+          const goalFloorY = g.y + g.h - b.r;
+
+          // if we hit the goal floor
+          if (b.y >= goalFloorY) {
+            // small bounce then roll
+            b.y = goalFloorY;
+            // reverse and dampen vertical velocity
+            if (Math.abs(b.vy) > 60) {
+              b.vy *= -0.35; // small bounce inside box
+            } else {
+              b.vy = 0;
+            }
+
+            // apply rolling friction to horizontal velocity
+            b.vx *= 0.92; // friction inside box
+
+            // if very slow, settle
+            if (Math.abs(b.vx) < 8 && Math.abs(b.vy) < 8) {
+              b.vx = 0;
+              b.vy = 0;
+              b.moving = false;
+
+              // score only once when settled inside
+              if (!scoredRef.current) {
+                scoredRef.current = true;
+                setScore((s) => s + 1);
+                playSuccess();
+              }
+            }
+          }
+
+          // side walls of the goal (simple reflection)
+          if (b.x - b.r <= g.x + 6) {
+            b.x = g.x + 6 + b.r;
+            b.vx *= -0.5;
+          }
+          if (b.x + b.r >= g.x + g.w - 6) {
+            b.x = g.x + g.w - 6 - b.r;
+            b.vx *= -0.5;
+          }
+        } else {
+          // normal floor collision (outside goal)
+          if (b.y >= floorY) {
+            b.y = floorY;
+            b.vy *= -0.45;
+            b.vx *= 0.7;
+            if (Math.abs(b.vy) < 30) {
+              b.vy = 0;
+              // small rolling friction
+              b.vx *= 0.9;
+              if (Math.abs(b.vx) < 6) {
+                b.vx = 0;
+                b.moving = false;
+              }
+            }
+          }
+
+          // pillar collision while moving (simple)
+          if (b.x >= p.x && b.x <= p.x + p.w && b.y + b.r >= p.y) {
+            // simple response: stop the ball
+            b.moving = false;
+            b.vx = 0;
+            b.vy = 0;
+          }
+
+          // walls
+          if (b.x < b.r) {
+            b.x = b.r;
+            b.vx *= -0.6;
+          }
+          if (b.x > rect.width - b.r) {
+            b.x = rect.width - b.r;
+            b.vx *= -0.6;
+          }
+        }
+      }
+
+      const logicalW = canvas.width / (window.devicePixelRatio || 1);
+      const logicalH = canvas.height / (window.devicePixelRatio || 1);
+      draw(ctx, logicalW, logicalH);
+
+      rafRef.current = requestAnimationFrame(frame);
+    };
+
+    rafRef.current = requestAnimationFrame(frame);
+
+    // pointer navigation
+    const getPos = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      const pos = getPos(e);
+      const b = ballRef.current;
+
+      if (pointOnBall(pos.x, pos.y) && !b.moving) {
+        // enter aim mode
+        aimRef.current.active = true;
+        aimRef.current.x = pos.x;
+        aimRef.current.y = pos.y;
+        setAiming(true);
+        e.preventDefault();
+        return;
+      }
+
+      if (aimRef.current.active) {
+        aimRef.current.x = pos.x;
+        aimRef.current.y = pos.y;
+        launchAtAim();
+        e.preventDefault();
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!aimRef.current.active) return;
+      const pos = getPos(e);
+      aimRef.current.x = pos.x;
+      aimRef.current.y = pos.y;
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        aimRef.current.active = false;
+        setAiming(false);
+      }
+    };
+
+    canvas.addEventListener('pointerdown', onPointerDown as any);
+    window.addEventListener('pointermove', onPointerMove as any);
+    window.addEventListener('keydown', onKey);
+
+    return () => {
+      window.removeEventListener('resize', resize);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      canvas.removeEventListener('pointerdown', onPointerDown as any);
+      window.removeEventListener('pointermove', onPointerMove as any);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [powerMultiplier]);
+
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-green-600 text-white">
-      <h1 className="text-3xl font-bold mb-6">🎾 Beginner Tennis Game</h1>
-      <div className="relative w-[400px] h-[200px] bg-green-800 border-4 border-white rounded-2xl overflow-hidden">
-        <motion.div
-          className="absolute w-6 h-6 bg-yellow-300 rounded-full shadow-lg"
-          animate={{ left: `${ballPosition.x}%`, top: `${ballPosition.y}%` }}
-          transition={{ type: 'spring', stiffness: 100, damping: 8 }}
-        />
+    <div style={{ width: '100%', height: '100vh', position: 'relative', touchAction: 'none' }}>
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+
+      {/* Overlay controls */}
+      <div style={{ position: 'absolute', left: 16, bottom: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button
+          onClick={() => {
+            resetBall();
+            setShots(0);
+            setScore(0);
+          }}
+          style={{ padding: '8px 12px', borderRadius: 8 }}
+        >
+          Reset
+        </button>
+
+        <button onClick={() => setLevel((l) => l + 1)} style={{ padding: '8px 12px', borderRadius: 8 }}>
+          Next Level
+        </button>
+
+        <label style={{ color: '#fff', marginLeft: 12 }}>
+          Power:
+          <input
+            type="range"
+            min={0.5}
+            max={2}
+            step={0.05}
+            value={powerMultiplier}
+            onChange={(e) => setPowerMultiplier(Number(e.target.value))}
+            style={{ marginLeft: 8 }}
+          />
+        </label>
       </div>
-      <div className="flex gap-10 mt-6 text-xl">
-        <p>Player: <span className="font-bold">{playerScore}</span></p>
-        <p>CPU: <span className="font-bold">{cpuScore}</span></p>
+
+      <div style={{ position: 'absolute', left: 16, top: 14, color: '#fff', fontWeight: 600 }}>
+        <div>Level: {level}</div>
       </div>
-      <button
-        onClick={hitBall}
-        className="mt-6 px-6 py-3 bg-yellow-400 text-black rounded-xl font-semibold shadow-md hover:bg-yellow-300 transition"
+
+      <div style={{ position: 'absolute', right: 16, top: 12, color: '#fff', fontWeight: 600, textAlign: 'right' }}>
+        <div>Score: {score}</div>
+        <div>Shots: {shots}</div>
+      </div>
+
+      <div
+        style={{
+          position: 'absolute',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          bottom: 16,
+          color: '#fff',
+          background: 'rgba(0,0,0,0.18)',
+          padding: '6px 10px',
+          borderRadius: 8,
+          fontSize: 13,
+        }}
       >
-        Hit the Ball 🎾
-      </button>
+        {aiming ? 'Aiming — tap/click to shoot. ESC to cancel.' : 'Tap/click the ball to aim'}
+      </div>
     </div>
   );
 }
