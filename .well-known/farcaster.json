@@ -1,34 +1,35 @@
 {
-  "accountAssociation": {
-    "header": "eyJmaWQiOjEzOTUxNjksInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHg0MzUzYTkzMTRjMDI4MmU5ZkM4NmI4NmFCNjNDMkM3MTI3YTMxN2EwIn0",
-    "payload": "eyJkb21haW4iOiJiYXNlanVtcC03NTc1LnZlcmNlbC5hcHAifQ",
-    "signature": "2lN+M6XvuuQWdrUYHZFRqIvjapnImkbUjHS1e97yUx06hhv8qxph6LCKQj2epqXhXSLx33HD4Juc1HrBWfTYBBw="
-  },
-  "baseBuilder": {
-    "ownerAddress": "0x0e315015A4eE8d5D6c4b43E300dF76b965D55bDd" 
+ "accountAssociation": {
+    "header": "eyJmaWQiOjkxNTIsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHgwMmVmNzkwRGQ3OTkzQTM1ZkQ4NDdDMDUzRURkQUU5NDBEMDU1NTk2In0",
+    "payload": "eyJkb21haW4iOiJyZXdhcmRzLndhcnBjYXN0LmNvbSJ9",
+    "signature": "MHgxMGQwZGU4ZGYwZDUwZTdmMGIxN2YxMTU2NDI1MjRmZTY0MTUyZGU4ZGU1MWU0MThiYjU4ZjVmZmQxYjRjNDBiNGVlZTRhNDcwNmVmNjhlMzQ0ZGQ5MDBkYmQyMmNlMmVlZGY5ZGQ0N2JlNWRmNzMwYzUxNjE4OWVjZDJjY2Y0MDFj"
   },
   "miniapp": {
     "version": "1",
-    "name": "Crypto Portfolio Tracker",
-    "homeUrl": "https://basejump-7575.vercel.app/",
-    "iconUrl": "https://basejump-7575.vercel.app/images/banner.png",
-    "splashImageUrl": "https://basejump-7575.vercel.app/images/basejump-splash.png",
+    "name": "Rewards",
+    "iconUrl": "https://rewards.warpcast.com/app.png",
+    "splashImageUrl": "https://rewards.warpcast.com/logo.png",
     "splashBackgroundColor": "#000000",
-    "webhookUrl": "https://basejump-7575.vercel.app/",
-    "subtitle": "Easy to manage",
-    "description": "Track and manage your cryptocurrency portfolio.",
+    "homeUrl": "https://rewards.warpcast.com/",
+    "webhookUrl": "https://client.farcaster.xyz/v1/creator-rewards-notifs-webhook",
+    "subtitle": "Top Warpcast creators",
+    "description": "Climb the leaderboard and earn rewards by being active on Warpcast.",
     "screenshotUrls": [
-      "https://basejump-7575.vercel.app/images/banner.png",
-      "https://basejump-7575.vercel.app/images/banner.png",
-      "https://basejump-7575.vercel.app/images/banner.png"
+      "https://rewards.warpcast.com/screenshot1.png",
+      "https://rewards.warpcast.com/screenshot2.png",
+      "https://rewards.warpcast.com/screenshot3.png"
     ],
-    "primaryCategory": "finance",
-    "tags": ["finance"],
-    "heroImageUrl": "https://basejump-7575.vercel.app/images/**banner-farcaster-3-2.png*",
-    "tagline": "Save instantly",
-    "ogTitle": "Example Mini App",
-    "ogDescription": "Easy to manage portfolio.",
-    "ogImageUrl": "https://basejump-7575.vercel.app/images/banner-farcaster-3-2.png",
-    "noindex": true
+    "primaryCategory": "social",
+    "tags": [
+      "rewards",
+      "leaderboard",
+      "warpcast",
+      "earn"
+    ],
+    "heroImageUrl": "https://rewards.warpcast.com/og.png",
+    "tagline": "Top Warpcast creators",
+    "ogTitle": "Rewards",
+    "ogDescription": "Climb the leaderboard and earn rewards by being active on Warpcast.",
+    "ogImageUrl": "https://rewards.warpcast.com/og.png"
   }
 }
